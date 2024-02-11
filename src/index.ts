@@ -79,10 +79,10 @@ async function run() {
         return;
       }
 
-      const { name, email, role } = user;
+      const { _id, name, email, role } = user;
       const token = jwt.sign({ email }, process.env.JWT_SECRET as string, { expiresIn: process.env.JWT_ACCESS_EXPIRES_IN });
-      const responseUser = { name, email, role, token };
-      console.log(responseUser)
+      const responseUser = { _id, name, email, role, token };
+
       res.status(200).send({ message: 'Logged in successfully', success: true, content: responseUser });
     })
 
@@ -135,6 +135,91 @@ async function run() {
       ]).toArray();
 
       res.status(200).send(donations);
+    })
+
+    app.get('/api/v1/donations/:userId', async (req: Request, res: Response) => {
+      const userId = req.params.userId;
+
+      try {
+        const query = { organizer: new ObjectId(userId) };
+
+        const donations = await donationsCollection.aggregate([
+          { $match: query },
+          {
+            $lookup: {
+              from: 'categories',
+              localField: 'category',
+              foreignField: '_id',
+              as: 'category'
+            }
+          },
+          {
+            $lookup: {
+              from: 'users',
+              localField: 'organizer',
+              foreignField: '_id',
+              as: 'organizer'
+            }
+          },
+          { $unwind: '$category' },
+          { $unwind: '$organizer' }
+        ]).toArray();
+
+        res.status(200).send(donations);
+      }
+      catch (error) {
+        res.status(500).send('Internal Server Error');
+      }
+    })
+
+    app.post('/api/v1/donation', verifyJWT, async (req, res) => {
+      const donation = req.body;
+      try {
+        const insertDonation = {
+          ...donation,
+          organizer: ObjectId.createFromHexString(donation?.organizer),
+          category: ObjectId.createFromHexString(donation?.category),
+        }
+
+        const result = await donationsCollection.insertOne(insertDonation);
+        res.status(200).send({ message: 'Donation added successfully!', success: true, content: result });
+      }
+      catch (error) {
+        res.status(500).send('Internal Server Error!');
+      }
+    })
+
+    app.patch('/api/v1/donation/:id', verifyJWT, async (req, res) => {
+      const donation = req.body.data;
+      const id = req.params.id;
+      try {
+        const filter = { _id: new ObjectId(id) };
+        console.log(donation)
+        const updateDonation = {
+          $set: {
+            title: donation.title,
+            description: donation.description,
+            goal: donation.goal,
+            picture: donation.picture,
+            category: ObjectId.createFromHexString(donation?.category),
+            startDate: donation.startDate,
+            endDate: donation.endDate,
+            location: donation.location,
+          }
+        }
+        const result = await donationsCollection.updateOne(filter, updateDonation);
+        res.status(200).send({ message: 'Donation updated successfully!', success: true, content: result });
+      }
+      catch (error) {
+        res.status(500).send('Internal Server Error!');
+      }
+    })
+
+    app.delete('/donation/:id', verifyJWT, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await donationsCollection.deleteOne(query);
+      res.status(200).send({ message: 'Donation deleted successfully!', success: true, content: result });
     })
 
     app.get('/api/v1/donation/:id', async (req: Request, res: Response) => {
