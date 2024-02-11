@@ -1,8 +1,10 @@
 // const { MongoClient } = require("mongodb");
-import express, { Express, Request, Response } from "express";
+import express, { Express, NextFunction, Request, Response } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { MongoClient, ObjectId } from "mongodb";
+import jwt from "jsonwebtoken";
+import bcrypt from 'bcrypt';
 
 const app: Express = express();
 app.use(cors());
@@ -11,6 +13,23 @@ dotenv.config();
 
 const port = process.env.PORT || 5000;
 const client = new MongoClient(process.env.DB_URL || "");
+
+
+const verifyJWT = (req: Request, res: Response, next: NextFunction) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).send({ message: 'Unauthorized User' })
+  }
+
+  const token = authHeader.split(' ')[1];
+  jwt.verify(token, process.env.JWT_SECRET as string, function (err, user) {
+    if (err) {
+      return res.status(403).send({ message: 'Forbidden Access' })
+    }
+    (req as any).user = user;
+    next()
+  })
+}
 
 async function run() {
   try {
@@ -30,11 +49,13 @@ async function run() {
       const query = { email: user.email };
       const userExists = await usersCollection.findOne(query);
       if (userExists) {
-        res.status(409).send({ message: 'Already Registered with this Email!' })
+        res.status(409).send({ message: 'Already Registered with this Email!', success: false })
         return;
       }
 
-      const result = await usersCollection.insertOne({ ...user, role: "user" });
+      const hashedPassword = await bcrypt.hash(user.password, Number(process.env.BCRYPT_SALT_ROUNDS));
+      const result = await usersCollection.insertOne({ ...user, password: hashedPassword, role: "user" });
+
       if (result.acknowledged) {
         const insertedUser = await usersCollection.findOne({ _id: result.insertedId });
         res.status(200).send({ message: 'Registered successfully', content: insertedUser, success: true });
@@ -49,18 +70,19 @@ async function run() {
       const user = await usersCollection.findOne(query);
 
       if (!user) {
-        res.status(409).send({ message: 'User not found!' })
+        res.status(409).send({ message: 'User not found!', success: false })
         return;
       }
-      if (user.password !== payload.password) {
-        res.status(409).send({ message: 'Password is wrong!' })
+      const isPasswordMatched = await bcrypt.compare(payload.password, user.password);
+      if (!isPasswordMatched) {
+        res.status(409).send({ message: 'Password is wrong!', success: false })
         return;
       }
 
-      // Construct a new object with selected fields
       const { name, email, role } = user;
-      const responseUser = { name, email, role };
-
+      const token = jwt.sign({ email }, process.env.JWT_SECRET as string, { expiresIn: process.env.JWT_ACCESS_EXPIRES_IN });
+      const responseUser = { name, email, role, token };
+      console.log(responseUser)
       res.status(200).send({ message: 'Logged in successfully', success: true, content: responseUser });
     })
 
