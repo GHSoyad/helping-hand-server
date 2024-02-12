@@ -37,6 +37,7 @@ async function run() {
     const usersCollection = database.collection('users');
     const categoriesCollection = database.collection('categories');
     const donationsCollection = database.collection('donations');
+    const paymentsCollection = database.collection('payments');
 
     app.get('/api/v1/users', async (req: Request, res: Response) => {
       const query = {};
@@ -255,6 +256,53 @@ async function run() {
         res.status(500).send('Internal Server Error');
       }
     });
+
+    app.post('/api/v1/donation/payment/:id', verifyJWT, async (req, res) => {
+      const id = req.params.id;
+      const donation = req.body;
+
+      try {
+        console.log(id, donation)
+
+        const insertDonation = {
+          ...donation,
+          payerId: ObjectId.createFromHexString(donation?.payerId),
+          donationId: ObjectId.createFromHexString(id),
+        };
+        console.log(insertDonation)
+
+        const filter = { _id: new ObjectId(id) };
+
+        // Update the previous document
+        const updateDonation = {
+          $inc: { raised: parseInt(donation.amount) }, // Increment the value of 'raised' by 100
+          $push: { payments: { $each: [] } } // Ensure 'payments' exists as an array
+        };
+        console.log(updateDonation)
+        // Update the previous document
+        const update = await donationsCollection.updateOne(filter, updateDonation);
+
+        if (update.modifiedCount === 1) {
+          // If the update was successful, insert the new donation document
+          const create = await paymentsCollection.insertOne(insertDonation);
+          const newDocumentId = create.insertedId; // Get the ID of the newly inserted document
+
+          // Update the previous document again to push the new document ID to the payments array
+          const updateDonation = {
+            $push: { payments: newDocumentId }
+          };
+          await donationsCollection.updateOne(filter, updateDonation);
+
+          res.status(200).send({ message: 'Thank You! Donated successfully!', success: true, content: create });
+        } else {
+          // If the update didn't affect any document (perhaps due to wrong ID), send an appropriate error response
+          res.status(404).send({ message: 'Donation not found!', success: false });
+        }
+      }
+      catch (error) {
+        res.status(500).send('Internal Server Error!');
+      }
+    })
 
   }
   finally { }
