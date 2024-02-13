@@ -39,10 +39,10 @@ async function run() {
     const donationsCollection = database.collection('donations');
     const paymentsCollection = database.collection('payments');
 
-    app.get('/api/v1/users', async (req: Request, res: Response) => {
+    app.get('/api/v1/users', verifyJWT, async (req: Request, res: Response) => {
       const query = {};
       const users = await usersCollection.find(query).toArray();
-      res.status(200).send(users);
+      res.status(200).send({ message: 'Users Data Found.', content: users, success: true });
     });
 
     app.post('/api/v1/auth/register', async (req, res) => {
@@ -85,6 +85,24 @@ async function run() {
       const responseUser = { _id, name, email, role, token };
 
       res.status(200).send({ message: 'Logged in successfully', success: true, content: responseUser });
+    })
+
+    app.patch('/api/v1/admin/admin-user/:id', verifyJWT, async (req, res) => {
+      const user = req.body.data;
+      const id = req.params.id;
+      try {
+        const filter = { _id: new ObjectId(id) };
+        const updateUser = {
+          $set: {
+            role: "admin"
+          }
+        }
+        const result = await usersCollection.updateOne(filter, updateUser);
+        res.status(200).send({ message: 'User updated successfully!', success: true, content: result });
+      }
+      catch (error) {
+        res.status(500).send('Internal Server Error!');
+      }
     })
 
     app.get('/api/v1/categories', async (req: Request, res: Response) => {
@@ -136,6 +154,35 @@ async function run() {
       ]).toArray();
 
       res.status(200).send(donations);
+    })
+
+    app.get('/api/v1/donations/featured', async (req: Request, res: Response) => {
+      let query: any = {};
+      console.log("hit")
+      const donations = await donationsCollection.aggregate([
+        { $match: query },
+        {
+          $lookup: {
+            from: 'categories',
+            localField: 'category',
+            foreignField: '_id',
+            as: 'category'
+          }
+        },
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'organizer',
+            foreignField: '_id',
+            as: 'organizer'
+          }
+        },
+        { $unwind: '$category' },
+        { $unwind: '$organizer' },
+        { $limit: 4 }
+      ]).toArray();
+
+      res.status(200).send({ message: 'Featured donations found!', success: true, content: donations });
     })
 
     app.get('/api/v1/donations/:userId', async (req: Request, res: Response) => {
@@ -344,9 +391,8 @@ async function run() {
       }
     });
 
-    app.get('/api/v1/statistics/get-last-seven-days', async (req: Request, res: Response) => {
+    app.get('/api/v1/statistics/get-last-seven-days', verifyJWT, async (req: Request, res: Response) => {
       try {
-        // Calculate the date 7 days ago
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
