@@ -4,7 +4,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { MongoClient, ObjectId, PushOperator } from "mongodb";
 import jwt from "jsonwebtoken";
-import bcrypt from 'bcrypt';
+import bcrypt from "bcrypt";
+import moment from "moment"
 
 const app: Express = express();
 app.use(cors());
@@ -158,7 +159,6 @@ async function run() {
 
     app.get('/api/v1/donations/featured', async (req: Request, res: Response) => {
       let query: any = {};
-      console.log("hit")
       const donations = await donationsCollection.aggregate([
         { $match: query },
         {
@@ -242,7 +242,7 @@ async function run() {
       const id = req.params.id;
       try {
         const filter = { _id: new ObjectId(id) };
-        console.log(donation)
+
         const updateDonation = {
           $set: {
             title: donation.title,
@@ -391,32 +391,54 @@ async function run() {
       }
     });
 
-    app.get('/api/v1/statistics/get-last-seven-days', verifyJWT, async (req: Request, res: Response) => {
-      try {
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    app.get('/api/v1/statistics/payments', verifyJWT, async (req: Request, res: Response) => {
+      let selectedDays = 1;
 
-        const result = await paymentsCollection.aggregate([
-          {
-            $match: {
-              createdAt: { $gte: sevenDaysAgo } // Filter documents created in the last 7 days
-            }
-          },
-          {
-            $group: {
-              _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, // Group by day
-              totalAmount: { $sum: "$amount" } // Compute sum of 'amount' field for each day
-            }
-          },
-          {
-            $sort: { _id: 1 } // Sort by date in ascending order
-          }
-        ]).toArray();
+      const { currentYear, currentMonth, currentWeek, days } = req.query;
 
-        res.status(200).json({ message: 'Donation data found.', success: true, content: result });
-      } catch (error) {
-        res.status(500).json({ error: "Internal Server Error" });
+      if (Number(days) > 0) {
+        selectedDays = Number(days);
       }
+      else if (Number(currentYear) > 0) {
+        selectedDays = moment().dayOfYear();
+      }
+      else if (Number(currentMonth) > 0) {
+        selectedDays = moment().date();
+      }
+      else if (Number(currentWeek) > 0) {
+        selectedDays = moment().day();
+      }
+
+      const daysAgo = moment().subtract(selectedDays, 'days').startOf('day');
+
+      const result = await paymentsCollection.aggregate([
+        {
+          $match: {
+            createdAt: { $gte: daysAgo.toDate() } // Filter documents created in the last selected days
+          }
+        },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, // Group by day
+            totalAmount: { $sum: "$amount" } // Compute sum of 'amount' field for each day
+          }
+        }
+      ]).toArray();
+
+      const latestDaysList = Array.from({ length: selectedDays }, (_, i) =>
+        moment().subtract(i, 'days').format('YYYY-MM-DD')
+      );
+
+      const resultMap = new Map(result.map(item => [item?._id, item?.totalAmount]));
+
+      const finalResult = latestDaysList.map(day => ({
+        date: day,
+        day: moment(day).format("dddd"),
+        totalAmount: resultMap.get(day) || 0
+      }));
+
+      // Return the final result
+      res.status(200).json({ message: 'Statistics data found.', success: true, content: finalResult });
     });
 
   }
