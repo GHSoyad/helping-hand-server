@@ -102,97 +102,44 @@ async function run() {
         res.status(200).send({ message: 'User updated successfully!', success: true, content: result });
       }
       catch (error) {
-        res.status(500).send('Internal Server Error!');
+        res.status(500).send({ message: 'Internal Server Error!' });
       }
     })
 
     app.get('/api/v1/categories', async (req: Request, res: Response) => {
       const query = {};
       const categories = await categoriesCollection.find(query).toArray();
-      res.status(200).send(categories);
+      res.status(200).send({ message: 'Categories Found.', success: true, content: categories });
     });
 
     app.get('/api/v1/donations', async (req: Request, res: Response) => {
-      const searchText = req.query.searchText;
-      const category = req.query.category;
-
-      let query: any = {};
-      if (searchText && category) {
-        query = {
-          $and: [
-            { $or: [{ title: { $regex: searchText, $options: 'i' } }, { description: { $regex: searchText, $options: 'i' } }] },
-            { category: new ObjectId(category as string) } // Convert category string to ObjectId
-          ]
-        };
-      } else if (searchText) {
-        query = {
-          $or: [{ title: { $regex: searchText, $options: 'i' } }, { description: { $regex: searchText, $options: 'i' } }]
-        };
-      } else if (category) {
-        query = { category: new ObjectId(category as string) }; // Convert category string to ObjectId
-      }
-
-      const donations = await donationsCollection.aggregate([
-        { $match: query },
-        {
-          $lookup: {
-            from: 'categories',
-            localField: 'category',
-            foreignField: '_id',
-            as: 'category'
-          }
-        },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'organizer',
-            foreignField: '_id',
-            as: 'organizer'
-          }
-        },
-        { $unwind: '$category' },
-        { $unwind: '$organizer' }
-      ]).toArray();
-
-      res.status(200).send(donations);
-    })
-
-    app.get('/api/v1/donations/featured', async (req: Request, res: Response) => {
-      let query: any = {};
-      const donations = await donationsCollection.aggregate([
-        { $match: query },
-        {
-          $lookup: {
-            from: 'categories',
-            localField: 'category',
-            foreignField: '_id',
-            as: 'category'
-          }
-        },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'organizer',
-            foreignField: '_id',
-            as: 'organizer'
-          }
-        },
-        { $unwind: '$category' },
-        { $unwind: '$organizer' },
-        { $limit: 4 }
-      ]).toArray();
-
-      res.status(200).send({ message: 'Featured donations found!', success: true, content: donations });
-    })
-
-    app.get('/api/v1/donations/:userId', async (req: Request, res: Response) => {
-      const userId = req.params.userId;
+      const { searchText, category, featured, limit, userId, donationId } = req.query;
+      const matchStage: any = {};
 
       try {
-        const query = { organizer: new ObjectId(userId) };
+        // Queries
+        if (searchText) {
+          matchStage.$or = [
+            { title: { $regex: searchText, $options: 'i' } },
+            { description: { $regex: searchText, $options: 'i' } }
+          ];
+        }
+        if (category) {
+          matchStage.category = new ObjectId(category as string);
+        }
+        if (userId) {
+          matchStage.organizer = new ObjectId(userId as string);
+        }
+        if (donationId) {
+          matchStage._id = new ObjectId(donationId as string);
+        }
+        if (featured) {
+          matchStage.featured = true;
+        }
 
-        const donations = await donationsCollection.aggregate([
-          { $match: query },
+        // Const pipeline options
+        const pipeline: any = [
+          { $match: matchStage },
           {
             $lookup: {
               from: 'categories',
@@ -210,13 +157,22 @@ async function run() {
             }
           },
           { $unwind: '$category' },
-          { $unwind: '$organizer' }
-        ]).toArray();
+          { $unwind: '$organizer' },
+        ]
 
-        res.status(200).send(donations);
+        // Optional pipeline options
+        if (limit) {
+          pipeline.push(
+            { $limit: parseInt(limit as string) }
+          )
+        }
+
+        const donations = await donationsCollection.aggregate(pipeline).toArray();
+
+        res.status(200).send({ message: 'Donations Found.', success: true, content: donations });
       }
       catch (error) {
-        res.status(500).send('Internal Server Error');
+        res.status(500).send({ message: 'Internal Server Error!' });
       }
     })
 
@@ -233,7 +189,7 @@ async function run() {
         res.status(200).send({ message: 'Donation added successfully!', success: true, content: result });
       }
       catch (error) {
-        res.status(500).send('Internal Server Error!');
+        res.status(500).send({ message: 'Internal Server Error!' });
       }
     })
 
@@ -259,7 +215,7 @@ async function run() {
         res.status(200).send({ message: 'Donation updated successfully!', success: true, content: result });
       }
       catch (error) {
-        res.status(500).send('Internal Server Error!');
+        res.status(500).send({ message: 'Internal Server Error!' });
       }
     })
 
@@ -345,7 +301,7 @@ async function run() {
         }
       }
       catch (error) {
-        res.status(500).send('Internal Server Error!');
+        res.status(500).send({ message: 'Internal Server Error!' });
       }
     })
 
@@ -387,7 +343,7 @@ async function run() {
           }
         });
       } catch (error) {
-        res.status(500).json({ error: "Internal Server Error" });
+        res.status(500).json({ message: "Internal Server Error" });
       }
     });
 
